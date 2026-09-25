@@ -27,7 +27,7 @@ jobs:
       # the job during setup, before any of the checks below even run.
       - name: Install Rust (nightly)
         run: |
-          rustup toolchain install nightly --profile minimal --component rustfmt
+          rustup toolchain install nightly --profile minimal --component rustfmt --component clippy
           rustup default nightly
 
       - name: Cache cargo registry and build artifacts
