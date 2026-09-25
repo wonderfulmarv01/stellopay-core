@@ -20,7 +20,9 @@
 //! `elapsed_seconds * refill_rate` using integer arithmetic. Calls made inside
 //! the same ledger second receive no partial or fractional refill credit.
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol,
+};
 
 #[contracttype]
 #[derive(Clone)]
@@ -106,6 +108,11 @@ impl RateLimiter {
         env.storage()
             .persistent()
             .set(&StorageKey::Initialized, &true);
+
+        env.events().publish(
+            (symbol_short!("RATE"), symbol_short!("init")),
+            (admin, default_burst, default_refill_rate, admin_bypass),
+        );
     }
 
     /// Configures the global rate limit.
@@ -126,6 +133,11 @@ impl RateLimiter {
         env.storage()
             .persistent()
             .set(&StorageKey::GlobalRefillRate, &refill_rate);
+
+        env.events().publish(
+            (symbol_short!("RATE"), symbol_short!("global")),
+            (enabled, burst, refill_rate),
+        );
     }
 
     /// Sets a per-address limit override.
@@ -139,8 +151,13 @@ impl RateLimiter {
     pub fn set_limit_for(env: Env, addr: Address, burst: u32, refill_rate: u32) {
         Self::require_admin_auth(&env);
         env.storage().persistent().set(
-            &StorageKey::Limit(addr),
+            &StorageKey::Limit(addr.clone()),
             &LimitConfig { burst, refill_rate },
+        );
+
+        env.events().publish(
+            (symbol_short!("RATE"), symbol_short!("addr_set")),
+            (addr, (burst, refill_rate)),
         );
     }
 
@@ -149,7 +166,12 @@ impl RateLimiter {
     /// @dev Only callable by admin.
     pub fn clear_limit_for(env: Env, addr: Address) {
         Self::require_admin_auth(&env);
-        env.storage().persistent().remove(&StorageKey::Limit(addr));
+        env.storage().persistent().remove(&StorageKey::Limit(addr.clone()));
+
+        env.events().publish(
+            (symbol_short!("RATE"), symbol_short!("addr_clr")),
+            (addr, None::<(u32, u32)>),
+        );
     }
 
     /// Sets a per-contract throughput budget.
@@ -165,8 +187,13 @@ impl RateLimiter {
     pub fn set_limit_for_contract(env: Env, contract: Address, burst: u32, refill_rate: u32) {
         Self::require_admin_auth(&env);
         env.storage().persistent().set(
-            &StorageKey::ContractLimit(contract),
+            &StorageKey::ContractLimit(contract.clone()),
             &LimitConfig { burst, refill_rate },
+        );
+
+        env.events().publish(
+            (symbol_short!("RATE"), Symbol::new(&env, "contract_set")),
+            (contract, (burst, refill_rate)),
         );
     }
 
@@ -179,7 +206,12 @@ impl RateLimiter {
         Self::require_admin_auth(&env);
         env.storage()
             .persistent()
-            .remove(&StorageKey::ContractLimit(contract));
+            .remove(&StorageKey::ContractLimit(contract.clone()));
+
+        env.events().publish(
+            (symbol_short!("RATE"), Symbol::new(&env, "contract_clr")),
+            (contract, None::<(u32, u32)>),
+        );
     }
 
     /// Checks and consumes one whole token from the subject's rate limit.
@@ -217,7 +249,12 @@ impl RateLimiter {
     /// @dev Only callable by admin.
     pub fn reset_usage(env: Env, addr: Address) {
         Self::require_admin_auth(&env);
-        env.storage().persistent().remove(&StorageKey::Usage(addr));
+        env.storage().persistent().remove(&StorageKey::Usage(addr.clone()));
+
+        env.events().publish(
+            (symbol_short!("RATE"), symbol_short!("u_reset")),
+            (addr, None::<(u64, u32)>),
+        );
     }
 
     /// Explicitly resets usage for a contract-scoped bucket.
@@ -227,7 +264,12 @@ impl RateLimiter {
         Self::require_admin_auth(&env);
         env.storage()
             .persistent()
-            .remove(&StorageKey::ContractUsage(contract));
+            .remove(&StorageKey::ContractUsage(contract.clone()));
+
+        env.events().publish(
+            (symbol_short!("RATE"), symbol_short!("c_reset")),
+            (contract, None::<(u64, u32)>),
+        );
     }
 
     /// Transfers admin rights to a new address.
@@ -235,9 +277,20 @@ impl RateLimiter {
     /// @dev Only callable by current admin.
     pub fn transfer_admin(env: Env, new_admin: Address) {
         Self::require_admin_auth(&env);
+        let old_admin: Address = env
+            .storage()
+            .persistent()
+            .get(&StorageKey::Admin)
+            .expect("admin not set");
+
         env.storage()
             .persistent()
             .set(&StorageKey::Admin, &new_admin);
+
+        env.events().publish(
+            (symbol_short!("RATE"), symbol_short!("admin")),
+            (old_admin, new_admin),
+        );
     }
 
     /// Gets current config for an address.
