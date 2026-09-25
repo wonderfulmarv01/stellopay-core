@@ -2,8 +2,9 @@
 
 use rate_limiter::{RateLimiter, RateLimiterClient};
 use soroban_sdk::{
-    testutils::{Address as _, Ledger},
-    Address, Env,
+    symbol_short,
+    testutils::{Address as _, Events, Ledger},
+    Address, Env, IntoVal,
 };
 
 fn create_env() -> Env {
@@ -223,6 +224,72 @@ fn test_admin_transfer() {
 
     client.transfer_admin(&admin2);
     assert_eq!(client.get_admin(), Some(admin2.clone()));
+}
+
+#[test]
+fn test_mutating_entrypoints_emit_expected_events() {
+    let env = create_env();
+    let contract_id = env.register(RateLimiter, ());
+    let client = RateLimiterClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let contract = Address::generate(&env);
+
+    client.initialize(&admin, &10u32, &2u32, &false);
+    let events = env.events().all();
+    let (_, topics, data) = events.last().unwrap();
+    assert_eq!(topics.get(0).unwrap(), symbol_short!("RATE"));
+    assert_eq!(topics.get(1).unwrap(), symbol_short!("init"));
+    assert_eq!(data, (admin.clone(), 10u32, 2u32, false).into_val(&env));
+
+    client.set_global_limit(&true, &9u32, &3u32);
+    let (_, topics, data) = env.events().all().last().unwrap();
+    assert_eq!(topics.get(0).unwrap(), symbol_short!("RATE"));
+    assert_eq!(topics.get(1).unwrap(), symbol_short!("global"));
+    assert_eq!(data, (true, 9u32, 3u32).into_val(&env));
+
+    client.set_limit_for(&user, &7u32, &4u32);
+    let (_, topics, data) = env.events().all().last().unwrap();
+    assert_eq!(topics.get(0).unwrap(), symbol_short!("RATE"));
+    assert_eq!(topics.get(1).unwrap(), symbol_short!("addr_set"));
+    assert_eq!(data, (user.clone(), (7u32, 4u32)).into_val(&env));
+
+    client.clear_limit_for(&user);
+    let (_, topics, data) = env.events().all().last().unwrap();
+    assert_eq!(topics.get(0).unwrap(), symbol_short!("RATE"));
+    assert_eq!(topics.get(1).unwrap(), symbol_short!("addr_clr"));
+    assert_eq!(data, (user.clone(), None::<(u32, u32)>).into_val(&env));
+
+    client.set_limit_for_contract(&contract, &12u32, &5u32);
+    let (_, topics, data) = env.events().all().last().unwrap();
+    assert_eq!(topics.get(0).unwrap(), symbol_short!("RATE"));
+    assert_eq!(topics.get(1).unwrap(), symbol_short!("contract_set"));
+    assert_eq!(data, (contract.clone(), (12u32, 5u32)).into_val(&env));
+
+    client.clear_limit_for_contract(&contract);
+    let (_, topics, data) = env.events().all().last().unwrap();
+    assert_eq!(topics.get(0).unwrap(), symbol_short!("RATE"));
+    assert_eq!(topics.get(1).unwrap(), symbol_short!("contract_clr"));
+    assert_eq!(data, (contract.clone(), None::<(u32, u32)>).into_val(&env));
+
+    client.reset_usage(&user);
+    let (_, topics, data) = env.events().all().last().unwrap();
+    assert_eq!(topics.get(0).unwrap(), symbol_short!("RATE"));
+    assert_eq!(topics.get(1).unwrap(), symbol_short!("u_reset"));
+    assert_eq!(data, (user.clone(), None::<(u64, u32)>).into_val(&env));
+
+    client.reset_contract_usage(&contract);
+    let (_, topics, data) = env.events().all().last().unwrap();
+    assert_eq!(topics.get(0).unwrap(), symbol_short!("RATE"));
+    assert_eq!(topics.get(1).unwrap(), symbol_short!("c_reset"));
+    assert_eq!(data, (contract.clone(), None::<(u64, u32)>).into_val(&env));
+
+    client.transfer_admin(&new_admin);
+    let (_, topics, data) = env.events().all().last().unwrap();
+    assert_eq!(topics.get(0).unwrap(), symbol_short!("RATE"));
+    assert_eq!(topics.get(1).unwrap(), symbol_short!("admin"));
+    assert_eq!(data, (admin.clone(), new_admin.clone()).into_val(&env));
 }
 
 #[test]
